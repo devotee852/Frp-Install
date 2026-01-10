@@ -194,7 +194,7 @@ install_frp() {
     
     # 下载frp
     echo -e "${BLUE}正在下载 frp v${FRP_VERSION}...${NC}"
-    if wget --show-progress -q -O /tmp/frp.tar.gz "$FRP_URL"; then
+    if wget  /tmp/frp.tar.gz "$FRP_URL"; then
         echo -e "${GREEN}✓ 下载成功${NC}"
     else
         echo -e "${RED}✗ 主下载源失败，尝试备用源...${NC}"
