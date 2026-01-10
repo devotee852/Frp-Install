@@ -2,41 +2,43 @@
 
 # 检查root权限
 if [ "$(id -u)" != "0" ]; then
-    echo "错误：必须使用root权限运行此脚本！" >&2
+    echo "错误：此脚本必须使用root权限运行！" >&2
     exit 1
 fi
 
-# 识别系统类型
-if grep -qi "debian" /etc/os-release; then
-    PKG_MANAGER="apt-get"
-elif grep -qi "centos" /etc/os-release; then
-    PKG_MANAGER="yum"
+# 系统检测
+if [ -f /etc/redhat-release ]; then
+    SYSTEM="centos"
+elif [ -f /etc/debian_version ]; then
+    SYSTEM="debian"
 else
-    echo "错误：不支持的系统！仅支持Debian/CentOS" >&2
+    echo "错误：不支持的操作系统！" >&2
     exit 1
 fi
 
-# 安装依赖
-$PKG_MANAGER update -y
-$PKG_MANAGER install -y wget tar
+# 安装必要工具
+if [ "$SYSTEM" = "centos" ]; then
+    yum install -y wget tar
+else
+    apt-get update
+    apt-get install -y wget tar
+fi
 
-# 下载Frp
-FRP_VERSION="0.43.0"
-FRP_URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz"
-wget -O /tmp/frp.tar.gz "$FRP_URL"
+# 下载和解压Frp
+VERSION="0.43.0"
+URL="https://github.com/fatedier/frp/releases/download/v${VERSION}/frp_${VERSION}_linux_amd64.tar.gz"
+TMP_DIR=$(mktemp -d)
+wget -qO "$TMP_DIR/frp.tar.gz" "$URL"
+tar xzf "$TMP_DIR/frp.tar.gz" -C "$TMP_DIR"
 
-# 创建目录
-mkdir -p /etc/frp /var/log/frp /usr/local/frp
-
-# 解压文件
-tar -zxvf /tmp/frp.tar.gz -C /usr/local/frp --strip-components=1
-
-# 复制二进制文件
-cp /usr/local/frp/frps /usr/local/bin/
-chmod +x /usr/local/bin/frps
+# 创建目录结构
+INSTALL_DIR="/usr/local/frp"
+mkdir -p $INSTALL_DIR/{bin,conf,logs}
+cp $TMP_DIR/frp_${VERSION}_linux_amd64/frps $INSTALL_DIR/bin/
+chmod +x $INSTALL_DIR/bin/frps
 
 # 创建配置文件模板
-cat > /etc/frp/frps.ini << EOF
+cat > $INSTALL_DIR/conf/frps.ini << EOF
 [common]
 bind_port = 7000
 token = your_token_here
@@ -44,10 +46,6 @@ token = your_token_here
 dashboard_port = 7500
 dashboard_user = admin
 dashboard_pwd = admin
-
-log_file = /var/log/frp/frps.log
-log_level = info
-log_max_days = 3
 EOF
 
 # 创建systemd服务
@@ -58,55 +56,95 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
-ExecStart=/usr/local/bin/frps -c /etc/frp/frps.ini
+User=nobody
 Restart=on-failure
 RestartSec=5s
+ExecStart=$INSTALL_DIR/bin/frps -c $INSTALL_DIR/conf/frps.ini
+ExecReload=/bin/kill -s HUP \$MAINPID
+StandardOutput=file:$INSTALL_DIR/logs/frps.log
+StandardError=file:$INSTALL_DIR/logs/frps_error.log
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+# 清理临时文件
+rm -rf "$TMP_DIR"
+
+# 启动服务
+systemctl daemon-reload
+systemctl enable frps
+systemctl start frps
+
 # 创建管理脚本
 cat > /usr/local/bin/frp << 'EOF'
 #!/bin/bash
 
-SERVICE_NAME="frps"
+INSTALL_DIR="/usr/local/frp"
 
-if [ "$1" = "1" ]; then
-    echo "重载服务配置..."
-    systemctl daemon-reload
-    systemctl restart $SERVICE_NAME
-elif [ "$1" = "2" ]; then
-    systemctl start $SERVICE_NAME
-elif [ "$1" = "3" ]; then
-    systemctl stop $SERVICE_NAME
-elif [ "$1" = "4" ]; then
-    systemctl restart $SERVICE_NAME
-elif [ "$1" = "5" ]; then
-    systemctl status $SERVICE_NAME
-else
-    echo "请选择操作："
-    echo "1. 重载服务配置并重启"
-    echo "2. 启动服务"
-    echo "3. 停止服务"
-    echo "4. 重启服务"
-    echo "5. 查看服务状态"
-    read -p "输入数字 (1-5): " num
-    exec /usr/local/bin/frp "$num"
-fi
+show_menu() {
+    echo "=============================="
+    echo " Frp 服务管理脚本 "
+    echo "=============================="
+    echo "1. 启动 frp 服务"
+    echo "2. 停止 frp 服务"
+    echo "3. 重启 frp 服务"
+    echo "4. 查看服务状态"
+    echo "5. 重载服务配置"
+    echo "6. 显示安装目录"
+    echo "7. 退出"
+    echo "=============================="
+}
+
+case $1 in
+    [1-7]) 
+        choice=$1
+        ;;
+    *)
+        show_menu
+        read -p "请输入选项 (1-7): " choice
+        ;;
+esac
+
+case $choice in
+    1)
+        systemctl start frps
+        echo "服务已启动"
+        ;;
+    2)
+        systemctl stop frps
+        echo "服务已停止"
+        ;;
+    3)
+        systemctl restart frps
+        echo "服务已重启"
+        ;;
+    4)
+        systemctl status frps
+        ;;
+    5)
+        systemctl daemon-reload
+        echo "服务配置已重载"
+        ;;
+    6)
+        echo "Frp 安装目录: $INSTALL_DIR"
+        echo "配置文件目录: $INSTALL_DIR/conf"
+        echo "日志文件目录: $INSTALL_DIR/logs"
+        ;;
+    7)
+        exit 0
+        ;;
+    *)
+        echo "无效选项！"
+        exit 1
+        ;;
+esac
 EOF
 
-# 设置权限
 chmod +x /usr/local/bin/frp
 
-# 重载systemd
-systemctl daemon-reload
-systemctl enable frps
-
-echo "----------------------------------------"
+echo "=============================="
 echo "Frps 安装完成！"
-echo "管理命令: frp [选项]"
-echo "配置文件: /etc/frp/frps.ini"
-echo "日志文件: /var/log/frp/frps.log"
-echo "----------------------------------------"
+echo "管理命令: frp"
+echo "配置文件: $INSTALL_DIR/conf/frps.ini"
+echo "=============================="
