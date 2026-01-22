@@ -106,8 +106,10 @@ install_dependencies() {
 # 下载并安装frp
 install_frp() {
     FRP_VERSION="0.43.0"
-    FRP_URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
-    
+    #FRP_URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
+	#这里采用github加速下载FRPC安装包
+	FRP_URL="https://gh-proxy.org/https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
+
     echo -e "${YELLOW}正在下载 frp v${FRP_VERSION} for ${FRP_ARCH}...${NC}"
     
     # 创建目录
